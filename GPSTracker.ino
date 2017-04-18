@@ -9,12 +9,24 @@
  *  Designer for Adafruit Ultimate GPS Shield using MTK33x9 chipset
  *
  *  Some key concepts / notes
+ *  - no interrupt code (messy)
  *  - this uses the Adafruit GPS Logger with a soldered Red LED + 220 Ohm resistor at pin 6, Green LED + 220 Ohm resitstor at pin 4
  *  - the Red LED + Green LED are much more visible than the built-in and can be used for status update (see comments below)
  *  - built-in LED will be used for error codes
  *  - uses my MSTimer class to log to a GPS every 2 seconds (this interval can be changed)
- *  - 
+ *  
  */
+ 
+/*********************************************************************************************************
+ * 
+ * Status Codes:
+ * 
+ * - Both LEDS on: this is the startup, 1 or 2 seconds
+ * - Both LEDS on while built-in LED flashes: error, most likely SD card isn't insterted
+ * - Green LED then Red LED (while green is off): can't find a GPS fix, this may take a while, or go to a better location
+ * - Green LED then Red LED (while green stays on): logging data
+ * 
+ *********************************************************************************************************/
 
 
 // DATA should be something like: 35.655856,-105.977923
@@ -23,7 +35,6 @@
 #include "Adafruit_GPS_mod.h"
 #include <SoftwareSerial.h>
 #include <SD.h>
-#include <avr/sleep.h>
 
 
 #include "MSTimer.h"
@@ -56,6 +67,7 @@ MSTimer newFileTimer;
 #define TIME_BEFORE_NEWFILE (60000 * 60)
 
 #define SERIAL_DEBUG true
+
 
 
 void setup() {
