@@ -75,6 +75,10 @@ boolean Adafruit_GPS::parse(char *nmea) {
       // For the $GPRMC lines, there is an 'A' character in the 3rd field, but not in the $GPRMC lines, so we move the pointer past these to compensate
       if( *p == 'A' ) 
         p += 2;
+
+      else
+        Serial.println("$GPRMA line (has alt)");
+        
       Serial.println(p);
       // End fix by Scott
       
