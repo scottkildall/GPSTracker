@@ -9,11 +9,14 @@
  *  Designer for Adafruit Ultimate GPS Shield using MTK33x9 chipset
  *
  *  Some key concepts / notes
+ *  - uses Adafruit_GPS_mod files, which I altered from Adafruit's Adafruit_GPS due to a logging bug
  *  - no interrupt code (messy)
  *  - this uses the Adafruit GPS Logger with a soldered Red LED + 220 Ohm resistor at pin 6, Green LED + 220 Ohm resitstor at pin 4
  *  - the Red LED + Green LED are much more visible than the built-in and can be used for status update (see comments below)
  *  - built-in LED will be used for error codes
- *  - uses my MSTimer class to log to a GPS every 2 seconds (this interval can be changed)
+ *  - uses my MSTimer class to log to a GPS every 2 seconds (this interval can be changed), this is dictated through the dataSaveTimer
+ *  - will make a series of data files, sequentially numbered so that one of them doesn't get too large. 
+ *      You can alter this with the TIME_BEFORE_NEWFILE #define
  *  
  */
  
@@ -36,7 +39,6 @@
 #include <SoftwareSerial.h>
 #include <SD.h>
 
-
 #include "MSTimer.h"
 
 // Arudino Uno, use this
@@ -52,10 +54,9 @@ Adafruit_GPS GPS(&mySerial);
 /* set to true to only log to SD when GPS has a fix, for debugging, keep it false */
 #define LOG_FIXONLY false  
 
-
 // Set the pins used
-#define chipSelect 10
-#define ledPin 13
+#define chipSelect (10)
+#define ledPin (13)
 #define redLEDPin (6)
 #define greenLEDPin (4)
 
@@ -63,12 +64,13 @@ File datafile;
 MSTimer dataSaveTimer;
 const unsigned long dataSaveTime = 2000;
 
+//-- this will save sequential data files, keeping the milliseconds field intact. The reason for this is so that one datafile doesn't get
+//-- too large or corrupted. You can copy and paste these files together or use a file-stitcher program.
 MSTimer newFileTimer;
-#define TIME_BEFORE_NEWFILE (60000 * 60)
+#define TIME_BEFORE_NEWFILE (1000 * 60 * 60)    // in ms, e.g. 1000 * 60 * 60 = 1 hour
 
+//-- show debug messages (slower but helpful)
 #define SERIAL_DEBUG true
-
-
 
 void setup() {
   
@@ -76,26 +78,28 @@ void setup() {
   // also spit it out
   if(SERIAL_DEBUG) {
     Serial.begin(115200);
-    Serial.println("\r\nUltimate GPSlogger Shield");
+    Serial.println("\r\nGPS Tracker by Scott Kildall");
   }
-  
+
+  // Set output pins
   pinMode(ledPin, OUTPUT);
   pinMode(redLEDPin, OUTPUT);
   pinMode(greenLEDPin, OUTPUT);
- 
+
+  // initial status is Red LED and Green LED both on
   digitalWrite(redLEDPin, true);
   digitalWrite(greenLEDPin, true);
   
   // make sure that the default chip select pin is set to
   // output, even if you don't use it:
-  pinMode(10, OUTPUT);
+  pinMode(chipSelect, OUTPUT);
 
+  // SD Card initialization
   initSDCard();
-
   createSDFile();
-  
+
+  // GPS initialization
   initGPS();
-  
   
   dataSaveTimer.setTimer(dataSaveTime);
   dataSaveTimer.start();
@@ -103,10 +107,12 @@ void setup() {
   newFileTimer.setTimer(TIME_BEFORE_NEWFILE);
   newFileTimer.start();
 
-  if(SERIAL_DEBUG) 
-    Serial.println("Ready!");
+  if(SERIAL_DEBUG) {
+    Serial.println("Successful initialization");
+  }
 
-    digitalWrite(redLEDPin, false);
+  // Turn off red LED at this point
+  digitalWrite(redLEDPin, false);
 }
 
 
@@ -114,8 +120,9 @@ void setup() {
 void loop() {
     readGPSData();
     
-  //-- needs to be cleaned up
-  
+    //-- note by Scott, this needs to be cleaned up
+
+  // parsing code from Adafruit
   // if a sentence is received, we can check the checksum, parse it...
   if (GPS.newNMEAreceived()) {
     
@@ -142,7 +149,9 @@ void loop() {
        
     printGPSData();
 
+    // Data save timer
     if( dataSaveTimer.isExpired() ) {
+        // if the latitude != 0.0 then we have a gix 
         if( GPS.latitude != 0.0 ) {
           digitalWrite(redLEDPin, true);
           writeData();
@@ -161,52 +170,83 @@ void loop() {
         dataSaveTimer.start();
     }
 
-
+    // create a new file after the specified about of time
     if( newFileTimer.isExpired() ) {
       createSDFile();
       newFileTimer.start();
     }
 
-    // not sure what's going on here
-//    if (strstr(stringptr, "RMC") || strstr(stringptr, "GGA")) 
-//      datafile.flush();
 
-    if(SERIAL_DEBUG) 
+    if(SERIAL_DEBUG) {
       Serial.println();
+    }
   }
 }
 
 void writeData() {
+  
+  if(SERIAL_DEBUG) {
+      Serial.println("Writing data -->");
+      Serial.print("lat = " );
+      Serial.println(GPS.latitude/100,8);
+      Serial.print("lng = " );
+      Serial.println(GPS.longitude/100,8);
+      Serial.print("alt = " );
+      Serial.println(GPS.altitude,8);
+      Serial.println("----------------");
+   }
+    
   datafile.print(millis());
   datafile.print(",");
-  datafile.print(GPS.latitude,8);
+  datafile.print(GPS.latitude/100,8);
   datafile.print(",");
-  datafile.println(GPS.longitude,8);
+  datafile.println(GPS.longitude/100,8);
+  datafile.print(",");
+  datafile.println(GPS.altitude,8);
   datafile.flush();
 }
+
+//-- this is a raw data dump, from the original Adafruit code, I commented out the extra bits that I'm not using, e.g. time
 void printGPSData() {
   if(SERIAL_DEBUG) {
-   Serial.print("\nTime: ");
-    Serial.print(GPS.hour, DEC); Serial.print(':');
-    Serial.print(GPS.minute, DEC); Serial.print(':');
-    Serial.print(GPS.seconds, DEC); Serial.print('.');
-    Serial.println(GPS.milliseconds);
-    Serial.print("Date: ");
-    Serial.print(GPS.day, DEC); Serial.print('/');
-    Serial.print(GPS.month, DEC); Serial.print("/20");
-    Serial.println(GPS.year, DEC);
-    Serial.print("Fix: "); Serial.print((int)GPS.fix);
-    Serial.print(" quality: "); Serial.println((int)GPS.fixquality); 
+    Serial.println("----------------------------");
+    Serial.println("GPS INFO");
+//   Serial.print("\nTime: ");
+//    Serial.print(GPS.hour, DEC); Serial.print(':');
+//    Serial.print(GPS.minute, DEC); Serial.print(':');
+//    Serial.print(GPS.seconds, DEC); Serial.print('.');
+//    Serial.println(GPS.milliseconds);
+//    Serial.print("Date: ");
+//    Serial.print(GPS.day, DEC); Serial.print('/');
+//    Serial.print(GPS.month, DEC); Serial.print("/20");
+//    Serial.println(GPS.year, DEC);
+    Serial.print("Fix: ");
+    Serial.println((int)GPS.fix);
+    
+    Serial.print(" quality: ");
+    Serial.println((int)GPS.fixquality); 
     
     //if (GPS.fix) {
-      Serial.print("Location: ");
-       
-      Serial.print(GPS.latitude, 4); Serial.print(GPS.lat);
-      Serial.print(", "); 
-      Serial.print(GPS.longitude, 4); Serial.println(GPS.lon);
+      //Serial.print("Location: ");
+      Serial.print("Latitude: " );
+      Serial.println(GPS.latitude/100, 4);
+      Serial.print("Lat: " );
+      Serial.println(GPS.lat);
+      //Serial.print(", "); 
+
+      Serial.print("Longitude: " );
       
-      Serial.print("Altitude: "); Serial.println(GPS.altitude);
-      Serial.print("Satellites: "); Serial.println((int)GPS.satellites);
+      Serial.println(GPS.longitude/100, 4); 
+      Serial.print("lon: " );
+      Serial.println(GPS.lon);
+      
+      Serial.print("Altitude: ");
+      Serial.println(GPS.altitude);
+      
+      Serial.print("Satellites: ");
+      Serial.println((int)GPS.satellites);
+      
+    Serial.println("----------------------------");
     //}
 
   }
@@ -262,32 +302,7 @@ void createSDFile() {
    }
 }
 
-/*
-void createSDFile() {
-  char filename[32];
-  int fileNum = 1;
-  
-  // The SD Card needs an all caps filename
-   while( true ) {
-     sprintf(filename, "DATA_%d.CSV", fileNum);
-     if( SD.exists(filename) == false ) {
-       Serial.print("Opening new file: ");
-       Serial.println(filename);
-       datafile = SD.open(filename, FILE_WRITE);
-       break;
-     }
-  
-     fileNum++;
-   }
 
-   if( !datafile ) {
-    if(SERIAL_DEBUG) {
-      Serial.print("Couldnt create "); 
-      Serial.println(filename);
-    }
-   }
-}
-*/
 void initGPS() {
   // connect to the GPS at the desired rate
   GPS.begin(9600);
